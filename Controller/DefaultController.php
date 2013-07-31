@@ -18,25 +18,23 @@ use AHS\FacebookNewscoopBundle\Entity\Facebook;
 class DefaultController extends Controller
 {
     /**
-    * @Route("/admin/ahs/facebook-plugin/clear-cache")
+    * @Route("/admin/ahs/facebook-plugin/index", name="ahs_facebook_newscoop_default_index")
+    * @Route("/admin/ahs/facebook-plugin/clear-cache", name="ahs_facebook_newscoop_default_clear")
     */
     public function indexAction(Request $request)
     {   
-        $create = false;
-        $informations = new Facebook();
+        $article = $request->get('articleNumber');
+        $language = $request->get('languageId');
         $em = $this->getDoctrine()->getManager();
-        $informations = $em->getRepository('AHS\FacebookNewscoopBundle\Entity\Facebook')
-            ->findOneBy(array(
-                    'article' => $request->get('articleNumber'),
-                    'language' => $request->get('languageId'),
-                    'is_active' => true,
-            ));
-        if (!$informations) {
-            $create = true;
-        }
-        if ($informations) {
-            $facebookInfo = $this->clearpageCache($request->get('articleNumber'), $request->get('languageId'));
+        $info = $em->getRepository('AHS\FacebookNewscoopBundle\Entity\Facebook')
+                ->findOneBy(array(
+                        'article' => $article,
+                        'language' => $language,
+                        'is_active' => true,
+                ));
 
+        if ($request->get('_route') === "ahs_facebook_newscoop_default_index") {
+            $facebookInfo = $this->clearpageCache($article, $language);
             if (is_array($facebookInfo)) {
                 if (array_key_exists('message', $facebookInfo)) {
                     return new Response(json_encode(array(
@@ -45,23 +43,51 @@ class DefaultController extends Controller
                     )));
                 }
             }
-            $informations->setArticle($request->get('articleNumber'));
-            $informations->setLanguage($request->get('languageId'));
-            $informations->setTitle($facebookInfo['title']);
-            $informations->setDescription($facebookInfo['description']);
-            $informations->setUrl($facebookInfo['picture']['data']['url']);
-            if ($create) {
-                $em->persist($informations);
+            if (!$info) {
+                $this->insert($em, $article, $language, $facebookInfo['title'], $facebookInfo['description'], $facebookInfo['picture']['data']['url']);
+            } else if ($info->getTitle() != $facebookInfo['title'] || $info->getDescription() != $facebookInfo['description'] || $info->getUrl() != $facebookInfo['picture']['data']['url']) {
+                $info->setTitle($facebookInfo['title']);
+                $info->setDescription($facebookInfo['description']);
+                $info->setUrl($facebookInfo['picture']['data']['url']);
+                $em->flush();
             }
-            $em->flush();
-        }
 
-        return new Response(json_encode(array(
-            'status' => true, 
-            'title' => $informations->getTitle(),
-            'description' => $informations->getDescription(),
-            'url' => $informations->getUrl(),
-        )));
+            return new Response(json_encode(array(
+                'status' => true, 
+                'title' => $facebookInfo['title'],
+                'description' => $facebookInfo['description'],
+                'url' => $facebookInfo['picture']['data']['url'],
+            )));
+        } else {
+
+            if (!$info) {
+                $facebookInfo = $this->clearpageCache($article, $language);
+                if (is_array($facebookInfo)) {
+                    if (array_key_exists('message', $facebookInfo)) {
+                        return new Response(json_encode(array(
+                            'status' => false, 
+                            'message' => $facebookInfo['message']
+                        )));
+                    }
+                }
+
+                $this->insert($em, $article, $language, $facebookInfo['title'], $facebookInfo['description'], $facebookInfo['picture']['data']['url']);
+
+                return new Response(json_encode(array(
+                    'status' => true, 
+                    'title' => $information->getTitle(),
+                    'description' => $information->getDescription(),
+                    'url' => $information->getUrl(),
+                )));
+            }
+
+            return new Response(json_encode(array(
+                'status' => true, 
+                'title' => $info->getTitle(),
+                'description' => $info->getDescription(),
+                'url' => $info->getUrl(),
+            )));
+        }   
     }
 
     /**
@@ -85,7 +111,7 @@ class DefaultController extends Controller
             $article->getSectionNumber(),
             $article->getArticleNumber()
         );
-        
+
         try {
             $browser = new \Buzz\Browser(new \Buzz\Client\Curl());
             $response =  $browser->post('http://developers.facebook.com/tools/debug', array(
@@ -104,9 +130,30 @@ class DefaultController extends Controller
                 json_decode($urlPicture->getContent(), true)
             );
         } catch(\Buzz\Exception\ClientException $e) {
-             return array('message' => getGS('Connection with facebook failed'));
+             return array('message' => getGS('Connection to Facebook failed. Try again.'));
         }
 
         return $info;
+    }
+
+    /**
+     * Insert article info into database
+     * @param Doctrine\ORM\EntityManager $em
+     * @param  int $article
+     * @param  int $language
+     * @param  string $title
+     * @param  string $description
+     * @param  string $url
+     * @return void
+     */
+    private function insert($em, $articleId, $languageId, $title, $description, $url) {
+        $information = new Facebook();
+        $information->setArticle($articleId);
+        $information->setLanguage($languageId);
+        $information->setTitle($title);
+        $information->setDescription($description);
+        $information->setUrl($url);
+        $em->persist($information);
+        $em->flush();
     }
 }
